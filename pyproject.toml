@@ -1,0 +1,27 @@
+[project]
+name = "bin"
+version = "0.1.0"
+description = "Snowflake utility tools for PAT management and external volumes"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.35.0",
+    "click>=8.0",
+    "requests>=2.28",
+]
+
+[project.scripts]
+pat = "pat:main"
+extvolume = "extvolume:cli"
+
+[tool.uv]
+dev-dependencies = [
+    "ruff>=0.8.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]

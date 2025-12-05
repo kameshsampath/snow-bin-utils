@@ -1,0 +1,333 @@
+# https://taskfile.dev
+version: "3"
+
+dotenv: [".env"]
+
+vars:
+  PYTHON: python
+  # Default bucket name for demos
+  BUCKET: iceberg-demo
+  # AWS region
+  AWS_REGION: '{{.AWS_REGION | default "us-west-2"}}'
+
+env:
+  # Pass through important env vars
+  AWS_REGION: "{{.AWS_REGION}}"
+  SNOWFLAKE_DEFAULT_CONNECTION_NAME: "{{.SNOWFLAKE_DEFAULT_CONNECTION_NAME}}"
+  SNOWFLAKE_ROLE: "{{.SNOWFLAKE_ROLE}}"
+  SNOWFLAKE_DATABASE: "{{.SNOWFLAKE_DATABASE}}"
+
+tasks:
+  # ===========================================================================
+  # Setup Tasks
+  # ===========================================================================
+
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list-all
+
+  setup:
+    desc: Setup development environment with uv
+    cmds:
+      - uv venv
+      - uv sync
+    sources:
+      - pyproject.toml
+      - requirements.txt
+    generates:
+      - .venv/**/*
+
+  install:
+    desc: Install dependencies
+    cmds:
+      - uv sync
+
+  # ===========================================================================
+  # PAT Management Tasks
+  # ===========================================================================
+
+  pat:
+    desc: Create/rotate PAT for service user
+    summary: |
+      Creates or rotates a Programmatic Access Token (PAT) for the service user.
+
+      Required env vars:
+        SA_USER: Service account username
+        SA_ROLE: Service account role
+        PAT_OBJECTS_DB: Database for PAT objects
+
+      Example:
+        task pat SA_USER=my_service_user SA_ROLE=my_role
+    cmds:
+      - "{{.PYTHON}} pat.py --user {{.SA_USER}} --role {{.SA_ROLE}} --db {{.PAT_OBJECTS_DB}}"
+    requires:
+      vars: [SA_USER, SA_ROLE, PAT_OBJECTS_DB]
+
+  pat:no-rotate:
+    desc: Create PAT without rotating existing
+    cmds:
+      - "{{.PYTHON}} pat.py --user {{.SA_USER}} --role {{.SA_ROLE}} --db {{.PAT_OBJECTS_DB}} --no-rotate"
+    requires:
+      vars: [SA_USER, SA_ROLE, PAT_OBJECTS_DB]
+
+  # ===========================================================================
+  # External Volume Tasks
+  # ===========================================================================
+
+  extvolume:create:
+    desc: Create S3 bucket, IAM role, and Snowflake external volume
+    summary: |
+      Creates all resources needed for a Snowflake external volume:
+        - S3 bucket with versioning
+        - IAM policy and role
+        - Snowflake external volume
+        - Updates IAM trust policy with Snowflake's IAM user
+
+      Resources are prefixed with your username by default.
+
+      Example:
+        task extvolume:create BUCKET=my-data
+        task extvolume:create BUCKET=my-data -- --no-prefix
+    cmds:
+      - "{{.PYTHON}} extvolume.py --region {{.AWS_REGION}} create --bucket {{.BUCKET}} {{.CLI_ARGS}}"
+    requires:
+      vars: [BUCKET]
+
+  extvolume:delete:
+    desc: Delete external volume and AWS resources
+    summary: |
+      Deletes all resources associated with an external volume:
+        - Snowflake external volume
+        - IAM role and policy
+        - Optionally S3 bucket (use --delete-bucket)
+
+      Example:
+        task extvolume:delete BUCKET=my-data
+        task extvolume:delete BUCKET=my-data -- --delete-bucket --force
+    cmds:
+      - "{{.PYTHON}} extvolume.py --region {{.AWS_REGION}} delete --bucket {{.BUCKET}} {{.CLI_ARGS}}"
+    requires:
+      vars: [BUCKET]
+    prompt: "This will delete AWS and Snowflake resources. Continue?"
+
+  extvolume:verify:
+    desc: Verify external volume connectivity
+    summary: |
+      Verifies that Snowflake can connect to the external volume's S3 storage.
+
+      Example:
+        task extvolume:verify VOLUME=MY_EXTERNAL_VOLUME
+        task extvolume:verify BUCKET=my-data  # derives volume name
+    cmds:
+      - |
+        if [ -n "{{.VOLUME}}" ]; then
+          {{.PYTHON}} extvolume.py verify --volume-name {{.VOLUME}}
+        else
+          {{.PYTHON}} extvolume.py --region {{.AWS_REGION}} verify --volume-name $({{.PYTHON}} -c "from extvolume import to_sql_identifier, get_current_username; print(to_sql_identifier('{{.BUCKET}}_external_volume', get_current_username()))")
+        fi
+    vars:
+      VOLUME: '{{.VOLUME | default ""}}'
+
+  extvolume:describe:
+    desc: Describe external volume properties
+    summary: |
+      Shows external volume properties including:
+        - STORAGE_AWS_IAM_USER_ARN
+        - STORAGE_AWS_EXTERNAL_ID
+
+      Example:
+        task extvolume:describe VOLUME=MY_EXTERNAL_VOLUME
+    cmds:
+      - "{{.PYTHON}} extvolume.py describe --volume-name {{.VOLUME}}"
+    requires:
+      vars: [VOLUME]
+
+  extvolume:update-trust:
+    desc: Update IAM trust policy from external volume
+    summary: |
+      Re-syncs the IAM trust policy with Snowflake's IAM user ARN.
+      Use this if you've recreated the external volume or need to fix trust issues.
+
+      Example:
+        task extvolume:update-trust BUCKET=my-data
+        task extvolume:update-trust ROLE=my-role VOLUME=MY_VOLUME
+    cmds:
+      - |
+        if [ -n "{{.BUCKET}}" ]; then
+          {{.PYTHON}} extvolume.py --region {{.AWS_REGION}} update-trust --bucket {{.BUCKET}}
+        else
+          {{.PYTHON}} extvolume.py update-trust --role-name {{.ROLE}} --volume-name {{.VOLUME}}
+        fi
+    vars:
+      BUCKET: '{{.BUCKET | default ""}}'
+      ROLE: '{{.ROLE | default ""}}'
+      VOLUME: '{{.VOLUME | default ""}}'
+
+  # ===========================================================================
+  # External Volume Quick Start
+  # ===========================================================================
+
+  extvolume:up:
+    desc: Quick start - create bucket and external volume with defaults
+    summary: |
+      One-command setup for Iceberg external volumes. Creates:
+        - S3 bucket: {username}-{bucket}
+        - IAM role/policy
+        - External volume: {USERNAME}_{BUCKET}_EXTERNAL_VOLUME
+
+      Default bucket name is 'iceberg-demo'.
+
+      Example:
+        task extvolume:up
+        task extvolume:up BUCKET=my-data
+    cmds:
+      - task: extvolume:create
+        vars:
+          BUCKET: '{{.BUCKET | default "iceberg-demo"}}'
+
+  extvolume:down:
+    desc: Tear down - delete bucket and external volume
+    summary: |
+      Removes all resources created by extvolume:up:
+        - Snowflake external volume
+        - IAM role/policy  
+        - S3 bucket (with all contents)
+
+      Example:
+        task extvolume:down
+        task extvolume:down BUCKET=my-data
+    cmds:
+      - task: extvolume:delete
+        vars:
+          BUCKET: '{{.BUCKET | default "iceberg-demo"}}'
+          CLI_ARGS: "--delete-bucket --force"
+
+  # ===========================================================================
+  # Snowflake CLI Shortcuts
+  # ===========================================================================
+
+  snow:test:
+    desc: Test Snowflake connection
+    cmds:
+      - snow connection test
+
+  snow:sql:
+    desc: Run SQL query (use -- to pass query)
+    summary: |
+      Run a SQL query against Snowflake.
+
+      Example:
+        task snow:sql -- "SELECT CURRENT_TIMESTAMP()"
+        task snow:sql -- "SHOW EXTERNAL VOLUMES"
+    cmds:
+      - snow sql --query "{{.CLI_ARGS}}"
+
+  snow:volumes:
+    desc: List all external volumes
+    cmds:
+      - snow sql --query "SHOW EXTERNAL VOLUMES"
+
+  # ===========================================================================
+  # AWS CLI Shortcuts
+  # ===========================================================================
+
+  aws:whoami:
+    desc: Show current AWS identity
+    cmds:
+      - aws sts get-caller-identity
+
+  aws:buckets:
+    desc: List S3 buckets (filtered by username prefix)
+    cmds:
+      - aws s3 ls | grep $(whoami) || echo "No buckets with your prefix found"
+
+  aws:roles:
+    desc: List IAM roles (filtered by snowflake)
+    cmds:
+      - aws iam list-roles --query "Roles[?contains(RoleName, 'snowflake')].{Name:RoleName,Arn:Arn}" --output table
+
+  # ===========================================================================
+  # Development Tasks
+  # ===========================================================================
+
+  lint:
+    desc: Run linting
+    cmds:
+      - uv run ruff check .
+
+  format:
+    desc: Format code
+    cmds:
+      - uv run ruff format .
+
+  # ===========================================================================
+  # Help Tasks
+  # ===========================================================================
+
+  help:
+    desc: Show usage guide and quick start
+    summary: |
+      Snowflake External Volume & PAT Manager
+      ════════════════════════════════════════
+
+      QUICK START:
+        task extvolume:up                  Create external volume (defaults)
+        task extvolume:down                Tear down everything
+
+      DETAILED HELP:
+        task <task-name> --summary         Show detailed help for any task
+        task --list-all                    List all available tasks
+
+      NAMING CONVENTION:
+        Resources are prefixed with your username by default.
+        Use --no-prefix to disable, --prefix NAME for custom prefix.
+
+      EXAMPLES:
+        task extvolume:up                           # Quick start
+        task extvolume:create BUCKET=data           # Custom bucket
+        task extvolume:create --summary             # Show detailed help
+    cmds:
+      - task --summary help
+
+  help:naming:
+    desc: Explain prefix and naming conventions
+    summary: |
+      Naming Conventions
+      ══════════════════
+
+      Resources are PREFIXED with your username to avoid conflicts in shared AWS accounts.
+
+      EXAMPLE with BUCKET=iceberg-demo (user: ksampath):
+
+        AWS Resources (lowercase, hyphens):
+          Bucket:         ksampath-iceberg-demo
+          IAM Role:       ksampath-iceberg-demo-snowflake-role
+          IAM Policy:     ksampath-iceberg-demo-snowflake-policy
+
+        Snowflake Objects (UPPERCASE, underscores):
+          External Volume: KSAMPATH_ICEBERG_DEMO_EXTERNAL_VOLUME
+          External ID:     KSAMPATH_ICEBERG_DEMO_EXTERNAL_ID
+
+      PREFIX OPTIONS:
+        (default)         Your username is used as prefix
+        --prefix NAME     Use custom prefix
+        --no-prefix       No prefix (bucket name as-is)
+
+      EXAMPLES:
+        task extvolume:create BUCKET=data                    # → {user}-data
+        task extvolume:create BUCKET=data -- --no-prefix     # → data
+        task extvolume:create BUCKET=data -- --prefix proj   # → proj-data
+    cmds:
+      - task --summary help:naming
+
+  help:extvolume:
+    desc: Show extvolume CLI options
+    cmds:
+      - "{{.PYTHON}} extvolume.py --help"
+      - "{{.PYTHON}} extvolume.py create --help"
+
+  help:pat:
+    desc: Show pat CLI options
+    cmds:
+      - "{{.PYTHON}} pat.py --help"
