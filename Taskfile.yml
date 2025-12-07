@@ -93,13 +93,21 @@ tasks:
 
       Resources are prefixed with your username by default.
 
+      Environment variables (can be set in .env):
+        BUCKET: S3 bucket base name
+        EXTERNAL_VOLUME_NAME: Snowflake external volume name
+
       Example:
         task extvolume:create BUCKET=my-data
         task extvolume:create BUCKET=my-data -- --no-prefix
     cmds:
-      - "{{.EXTVOLUME_CLI}} --region {{.AWS_REGION}} create --bucket {{.BUCKET}} {{.CLI_ARGS}}"
-    requires:
-      vars: [BUCKET]
+      - "{{.EXTVOLUME_CLI}} --region {{.AWS_REGION}} create {{.CLI_ARGS}}"
+    env:
+      BUCKET: "{{.BUCKET}}"
+      EXTERNAL_VOLUME_NAME: "{{.EXTERNAL_VOLUME_NAME}}"
+    vars:
+      BUCKET: '{{.BUCKET | default ""}}'
+      EXTERNAL_VOLUME_NAME: '{{.EXTERNAL_VOLUME_NAME | default ""}}'
 
   extvolume:delete:
     desc: Delete external volume and AWS resources
@@ -109,13 +117,21 @@ tasks:
         - IAM role and policy
         - Optionally S3 bucket (use --delete-bucket)
 
+      Environment variables (can be set in .env):
+        BUCKET: S3 bucket base name
+        EXTERNAL_VOLUME_NAME: Snowflake external volume name
+
       Example:
         task extvolume:delete BUCKET=my-data
         task extvolume:delete BUCKET=my-data -- --delete-bucket --force
     cmds:
-      - "{{.EXTVOLUME_CLI}} --region {{.AWS_REGION}} delete --bucket {{.BUCKET}} {{.CLI_ARGS}}"
-    requires:
-      vars: [BUCKET]
+      - "{{.EXTVOLUME_CLI}} --region {{.AWS_REGION}} delete {{.CLI_ARGS}}"
+    env:
+      BUCKET: "{{.BUCKET}}"
+      EXTERNAL_VOLUME_NAME: "{{.EXTERNAL_VOLUME_NAME}}"
+    vars:
+      BUCKET: '{{.BUCKET | default ""}}'
+      EXTERNAL_VOLUME_NAME: '{{.EXTERNAL_VOLUME_NAME | default ""}}'
     prompt: "This will delete AWS and Snowflake resources. Continue?"
 
   extvolume:verify:
@@ -123,16 +139,16 @@ tasks:
     summary: |
       Verifies that Snowflake can connect to the external volume's S3 storage.
 
+      Environment variables (can be set in .env):
+        EXTERNAL_VOLUME_NAME: Snowflake external volume name
+
       Example:
         task extvolume:verify VOLUME=MY_EXTERNAL_VOLUME
-        task extvolume:verify BUCKET=my-data  # derives volume name
+        task extvolume:verify  # uses EXTERNAL_VOLUME_NAME from env
     cmds:
-      - |
-        if [ -n "{{.VOLUME}}" ]; then
-          {{.EXTVOLUME_CLI}} verify --volume-name {{.VOLUME}}
-        else
-          {{.EXTVOLUME_CLI}} --region {{.AWS_REGION}} verify --volume-name $({{.PYTHON}} -c "from extvolume import to_sql_identifier, get_current_username; print(to_sql_identifier('{{.BUCKET}}_external_volume', get_current_username()))")
-        fi
+      - "{{.EXTVOLUME_CLI}} verify"
+    env:
+      EXTERNAL_VOLUME_NAME: "{{.VOLUME}}"
     vars:
       VOLUME: '{{.VOLUME | default ""}}'
 
@@ -143,12 +159,18 @@ tasks:
         - STORAGE_AWS_IAM_USER_ARN
         - STORAGE_AWS_EXTERNAL_ID
 
+      Environment variables (can be set in .env):
+        EXTERNAL_VOLUME_NAME: Snowflake external volume name
+
       Example:
         task extvolume:describe VOLUME=MY_EXTERNAL_VOLUME
+        task extvolume:describe  # uses EXTERNAL_VOLUME_NAME from env
     cmds:
-      - "{{.EXTVOLUME_CLI}} describe --volume-name {{.VOLUME}}"
-    requires:
-      vars: [VOLUME]
+      - "{{.EXTVOLUME_CLI}} describe"
+    env:
+      EXTERNAL_VOLUME_NAME: "{{.VOLUME}}"
+    vars:
+      VOLUME: '{{.VOLUME | default ""}}'
 
   extvolume:update-trust:
     desc: Update IAM trust policy from external volume
@@ -156,19 +178,21 @@ tasks:
       Re-syncs the IAM trust policy with Snowflake's IAM user ARN.
       Use this if you've recreated the external volume or need to fix trust issues.
 
+      Environment variables (can be set in .env):
+        BUCKET: S3 bucket base name
+        EXTERNAL_VOLUME_NAME: Snowflake external volume name
+
       Example:
         task extvolume:update-trust BUCKET=my-data
         task extvolume:update-trust ROLE=my-role VOLUME=MY_VOLUME
+        task extvolume:update-trust  # uses env vars
     cmds:
-      - |
-        if [ -n "{{.BUCKET}}" ]; then
-          {{.EXTVOLUME_CLI}} --region {{.AWS_REGION}} update-trust --bucket {{.BUCKET}}
-        else
-          {{.EXTVOLUME_CLI}} update-trust --role-name {{.ROLE}} --volume-name {{.VOLUME}}
-        fi
+      - "{{.EXTVOLUME_CLI}} --region {{.AWS_REGION}} update-trust {{.CLI_ARGS}}"
+    env:
+      BUCKET: "{{.BUCKET}}"
+      EXTERNAL_VOLUME_NAME: "{{.VOLUME}}"
     vars:
       BUCKET: '{{.BUCKET | default ""}}'
-      ROLE: '{{.ROLE | default ""}}'
       VOLUME: '{{.VOLUME | default ""}}'
 
   # ===========================================================================
@@ -183,15 +207,16 @@ tasks:
         - IAM role/policy
         - External volume: {USERNAME}_{BUCKET}_EXTERNAL_VOLUME
 
-      Default bucket name is 'iceberg-demo'.
+      Environment variables (can be set in .env):
+        BUCKET: S3 bucket base name (default: iceberg-demo)
 
       Example:
         task extvolume:up
         task extvolume:up BUCKET=my-data
     cmds:
       - task: extvolume:create
-        vars:
-          BUCKET: '{{.BUCKET | default "iceberg-demo"}}'
+    env:
+      BUCKET: '{{.BUCKET | default "iceberg-demo"}}'
 
   extvolume:down:
     desc: Tear down - delete bucket and external volume
@@ -201,14 +226,18 @@ tasks:
         - IAM role/policy  
         - S3 bucket (with all contents)
 
+      Environment variables (can be set in .env):
+        BUCKET: S3 bucket base name (default: iceberg-demo)
+
       Example:
         task extvolume:down
         task extvolume:down BUCKET=my-data
     cmds:
       - task: extvolume:delete
-        vars:
-          BUCKET: '{{.BUCKET | default "iceberg-demo"}}'
-          CLI_ARGS: "--delete-bucket --force"
+    env:
+      BUCKET: '{{.BUCKET | default "iceberg-demo"}}'
+    vars:
+      CLI_ARGS: "--delete-bucket --force"
 
   # ===========================================================================
   # Snowflake CLI Shortcuts

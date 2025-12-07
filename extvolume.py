@@ -590,6 +590,7 @@ def cli(ctx: click.Context, region: str, prefix: str | None, no_prefix: bool) ->
     "--bucket",
     "-b",
     required=True,
+    envvar="BUCKET",
     help="S3 bucket base name (will be prefixed with username)",
 )
 @click.option(
@@ -604,6 +605,7 @@ def cli(ctx: click.Context, region: str, prefix: str | None, no_prefix: bool) ->
 )
 @click.option(
     "--volume-name",
+    envvar="EXTERNAL_VOLUME_NAME",
     default=None,
     help="Snowflake external volume name (default: {PREFIX}_{BUCKET}_EXTERNAL_VOLUME)",
 )
@@ -823,6 +825,7 @@ def create(
     "--bucket",
     "-b",
     required=True,
+    envvar="BUCKET",
     help="S3 bucket base name (same as used in create)",
 )
 @click.option(
@@ -837,6 +840,7 @@ def create(
 )
 @click.option(
     "--volume-name",
+    envvar="EXTERNAL_VOLUME_NAME",
     default=None,
     help="Snowflake external volume name (default: {PREFIX}_{BUCKET}_EXTERNAL_VOLUME)",
 )
@@ -946,6 +950,7 @@ def delete(
 @click.option(
     "--volume-name",
     "-v",
+    envvar="EXTERNAL_VOLUME_NAME",
     required=True,
     help="Snowflake external volume name",
 )
@@ -972,6 +977,7 @@ def verify(volume_name: str) -> None:
 @click.option(
     "--volume-name",
     "-v",
+    envvar="EXTERNAL_VOLUME_NAME",
     required=True,
     help="Snowflake external volume name",
 )
@@ -1003,6 +1009,7 @@ def describe(volume_name: str) -> None:
 @click.option(
     "--bucket",
     "-b",
+    envvar="BUCKET",
     default=None,
     help="S3 bucket base name (to derive role and volume names)",
 )
@@ -1015,6 +1022,7 @@ def describe(volume_name: str) -> None:
 @click.option(
     "--volume-name",
     "-v",
+    envvar="EXTERNAL_VOLUME_NAME",
     default=None,
     help="Snowflake external volume name (or derived from --bucket)",
 )

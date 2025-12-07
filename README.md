@@ -52,6 +52,10 @@ SNOWFLAKE_DATABASE=MY_DATABASE
 
 # AWS region (optional, defaults to us-west-2)
 AWS_REGION=us-west-2
+
+# External Volume defaults (optional)
+BUCKET=iceberg-demo
+EXTERNAL_VOLUME_NAME=MY_EXTERNAL_VOLUME
 ```
 
 ## Quick Start
@@ -87,7 +91,7 @@ snow-utils extvolume:down
 #### Examples
 
 ```bash
-# Quick start with defaults
+# Quick start with defaults (uses BUCKET from env or 'iceberg-demo')
 snow-utils extvolume:up
 
 # Create with custom bucket
@@ -99,11 +103,15 @@ snow-utils extvolume:create BUCKET=my-data -- --no-prefix
 # Create with custom prefix
 snow-utils extvolume:create BUCKET=my-data -- --prefix myproject
 
-# Verify volume connectivity
+# Verify volume connectivity (uses EXTERNAL_VOLUME_NAME from env)
+snow-utils extvolume:verify
 snow-utils extvolume:verify VOLUME=MY_EXTERNAL_VOLUME
 
-# Delete (keeps S3 bucket)
-snow-utils extvolume:delete BUCKET=my-data
+# Describe volume (uses EXTERNAL_VOLUME_NAME from env)
+snow-utils extvolume:describe
+
+# Delete (keeps S3 bucket, uses BUCKET from env)
+snow-utils extvolume:delete
 
 # Delete everything including S3 bucket
 snow-utils extvolume:delete BUCKET=my-data -- --delete-bucket --force
@@ -219,12 +227,37 @@ snow-utils extvolume:create BUCKET=data -- --prefix myproject
 
 ## Environment Variables
 
+All variables can be set in a `.env` file or exported in your shell.
+
+### Snowflake Connection
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SNOWFLAKE_DEFAULT_CONNECTION_NAME` | Snowflake connection profile | - |
 | `SNOWFLAKE_ROLE` | Snowflake role to use | - |
 | `SNOWFLAKE_DATABASE` | Default database | - |
+
+### AWS Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
 | `AWS_REGION` | AWS region for resources | `us-west-2` |
+
+### External Volume Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `BUCKET` | S3 bucket base name | `iceberg-demo` |
+| `EXTERNAL_VOLUME_NAME` | Snowflake external volume name | - |
+
+When these are set, you can run commands without parameters:
+
+```bash
+# With env vars set, no need to pass BUCKET
+snow-utils extvolume:create
+snow-utils extvolume:verify
+snow-utils extvolume:describe
+```
 
 ### PAT-specific Variables
 
