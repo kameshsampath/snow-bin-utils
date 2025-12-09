@@ -56,6 +56,13 @@ AWS_REGION=us-west-2
 # External Volume defaults (optional)
 BUCKET=iceberg-demo
 EXTERNAL_VOLUME_NAME=MY_EXTERNAL_VOLUME
+
+# PAT defaults (optional)
+SA_USER=my_service_user
+SA_ROLE=demo_role
+SA_ADMIN_ROLE=sysadmin
+PAT_OBJECTS_DB=my_db
+DOT_ENV_FILE=/path/to/your/project/.env  # where to write PAT credentials
 ```
 
 ## Quick Start
@@ -127,11 +134,17 @@ snow-utils extvolume:delete BUCKET=my-data -- --delete-bucket --force
 #### Examples
 
 ```bash
-# Create/rotate PAT
+# Create/rotate PAT with separate admin role
+snow-utils pat SA_USER=my_service_user SA_ROLE=demo_role SA_ADMIN_ROLE=sysadmin PAT_OBJECTS_DB=my_db
+
+# Create PAT (admin-role defaults to SA_ROLE if not specified)
 snow-utils pat SA_USER=my_service_user SA_ROLE=my_role PAT_OBJECTS_DB=my_db
 
+# Create using env vars from .env file
+snow-utils pat
+
 # Create without rotating existing PAT
-snow-utils pat:no-rotate SA_USER=my_service_user SA_ROLE=my_role PAT_OBJECTS_DB=my_db
+snow-utils pat:no-rotate
 ```
 
 ### Snowflake CLI Shortcuts
@@ -264,8 +277,20 @@ snow-utils extvolume:describe
 | Variable | Description |
 |----------|-------------|
 | `SA_USER` | Service account username |
-| `SA_ROLE` | Service account role |
+| `SA_ROLE` | Role restriction for the PAT (the role the service account will use) |
+| `SA_ADMIN_ROLE` | Admin role for creating network rules, policies, etc. (defaults to `SA_ROLE`) |
 | `PAT_OBJECTS_DB` | Database for PAT objects |
+| `DOT_ENV_FILE` | Path to .env file to update with PAT credentials (default: `.env` in current directory) |
+
+**Two roles explained:**
+- `SA_ROLE` - The role that will be assigned as the PAT's role restriction. This is the role your service account will use when authenticating with the PAT.
+- `SA_ADMIN_ROLE` - The role with privileges to create network rules, authentication policies, and database objects. Typically a role like `SYSADMIN` or `ACCOUNTADMIN`.
+
+**Note on DOT_ENV_FILE:** When running via symlink (`snow-utils`), the `.env` file is looked for in the `snow-bin-utils` project directory (due to `dir: "{{.TASKFILE_DIR}}"`). To update a `.env` file in a different project, set `DOT_ENV_FILE` to the absolute path:
+
+```bash
+snow-utils pat DOT_ENV_FILE=/path/to/your/project/.env
+```
 
 ## Getting Help
 

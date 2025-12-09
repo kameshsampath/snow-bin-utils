@@ -59,24 +59,48 @@ tasks:
     summary: |
       Creates or rotates a Programmatic Access Token (PAT) for the service user.
 
-      Required env vars:
+      Environment variables (can be set in .env):
         SA_USER: Service account username
-        SA_ROLE: Service account role
+        SA_ROLE: Role restriction for the PAT (the role the SA will use)
+        SA_ADMIN_ROLE: Admin role for creating policies (default: same as SA_ROLE)
         PAT_OBJECTS_DB: Database for PAT objects
+        DOT_ENV_FILE: Path to .env file to update (default: .env in current directory)
 
       Example:
-        task pat SA_USER=my_service_user SA_ROLE=my_role
+        task pat SA_USER=my_service_user SA_ROLE=demo_role SA_ADMIN_ROLE=sysadmin PAT_OBJECTS_DB=my_db
+        task pat DOT_ENV_FILE=/path/to/project/.env  # update .env in specific location
+        task pat  # uses env vars from .env
     cmds:
-      - "{{.PAT_CLI}} --user {{.SA_USER}} --role {{.SA_ROLE}} --db {{.PAT_OBJECTS_DB}}"
-    requires:
-      vars: [SA_USER, SA_ROLE, PAT_OBJECTS_DB]
+      - "{{.PAT_CLI}} {{.CLI_ARGS}}"
+    env:
+      SA_USER: "{{.SA_USER}}"
+      SA_ROLE: "{{.SA_ROLE}}"
+      SA_ADMIN_ROLE: "{{.SA_ADMIN_ROLE}}"
+      PAT_OBJECTS_DB: "{{.PAT_OBJECTS_DB}}"
+      DOT_ENV_FILE: "{{.DOT_ENV_FILE}}"
+    vars:
+      SA_USER: '{{.SA_USER | default ""}}'
+      SA_ROLE: '{{.SA_ROLE | default ""}}'
+      SA_ADMIN_ROLE: '{{.SA_ADMIN_ROLE | default ""}}'
+      PAT_OBJECTS_DB: '{{.PAT_OBJECTS_DB | default ""}}'
+      DOT_ENV_FILE: '{{.DOT_ENV_FILE | default ""}}'
 
   pat:no-rotate:
     desc: Create PAT without rotating existing
     cmds:
-      - "{{.PAT_CLI}} --user {{.SA_USER}} --role {{.SA_ROLE}} --db {{.PAT_OBJECTS_DB}} --no-rotate"
-    requires:
-      vars: [SA_USER, SA_ROLE, PAT_OBJECTS_DB]
+      - "{{.PAT_CLI}} --no-rotate {{.CLI_ARGS}}"
+    env:
+      SA_USER: "{{.SA_USER}}"
+      SA_ROLE: "{{.SA_ROLE}}"
+      SA_ADMIN_ROLE: "{{.SA_ADMIN_ROLE}}"
+      PAT_OBJECTS_DB: "{{.PAT_OBJECTS_DB}}"
+      DOT_ENV_FILE: "{{.DOT_ENV_FILE}}"
+    vars:
+      SA_USER: '{{.SA_USER | default ""}}'
+      SA_ROLE: '{{.SA_ROLE | default ""}}'
+      SA_ADMIN_ROLE: '{{.SA_ADMIN_ROLE | default ""}}'
+      PAT_OBJECTS_DB: '{{.PAT_OBJECTS_DB | default ""}}'
+      DOT_ENV_FILE: '{{.DOT_ENV_FILE | default ""}}'
 
   # ===========================================================================
   # External Volume Tasks

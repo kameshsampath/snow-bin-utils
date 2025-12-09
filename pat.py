@@ -69,8 +69,8 @@ def get_snowflake_account() -> str:
     return data.get("Account", "")
 
 
-def setup_service_user(user: str, role: str) -> None:
-    """Create service user and grant role."""
+def setup_service_user(user: str, pat_role: str) -> None:
+    """Create service user and grant the PAT role."""
     click.echo(f"Setting up service user: {user}")
 
     sql = f"""
@@ -78,19 +78,20 @@ def setup_service_user(user: str, role: str) -> None:
         CREATE USER IF NOT EXISTS {user}
             TYPE = SERVICE
             COMMENT = 'Service user for PAT access';
-        GRANT ROLE {role} TO USER {user};
+        GRANT ROLE {pat_role} TO USER {user};
     """
     run_snow_sql_stdin(sql)
-    click.echo(f"✓ Service user {user} configured")
+    click.echo(f"✓ Service user {user} configured with role {pat_role}")
 
 
-def setup_network_policy(user: str, role: str, db: str, local_ip: str) -> None:
-    """Create network rule and policy for the service user."""
+def setup_network_policy(user: str, admin_role: str, db: str, local_ip: str) -> None:
+    """Create network rule and policy for the service user using admin_role."""
 
     # Derive policy names from user
     network_rule_name = f"{user}_network_rule".upper()
     network_policy_name = f"{user}_network_policy".upper()
     click.echo(f"Setting up network policy for user {user}")
+    click.echo(f"Using admin role: {admin_role}")
     click.echo(f"Network rule: {db}.networks.{network_rule_name}")
     click.echo(f"Network policy: {network_policy_name}")
 
@@ -107,7 +108,7 @@ DROP NETWORK POLICY IF EXISTS {network_policy_name};
     cidr_list = f"'{local_ip}'"
 
     sql = f"""
-        USE ROLE {role};
+        USE ROLE {admin_role};
         GRANT CREATE NETWORK RULE ON SCHEMA {db}.networks TO ROLE accountadmin;
         GRANT CREATE AUTHENTICATION POLICY ON SCHEMA {db}.policies TO ROLE accountadmin;
 
@@ -178,8 +179,8 @@ def get_existing_pat(user: str, pat_name: str) -> str | None:
     return None
 
 
-def create_or_rotate_pat(user: str, role: str, pat_name: str, rotate: bool = False) -> str:
-    """Create a new PAT or rotate an existing one."""
+def create_or_rotate_pat(user: str, pat_role: str, pat_name: str, rotate: bool = False) -> str:
+    """Create a new PAT or rotate an existing one with pat_role as the role restriction."""
     existing = get_existing_pat(user, pat_name)
 
     if existing and not rotate:
@@ -190,8 +191,8 @@ def create_or_rotate_pat(user: str, role: str, pat_name: str, rotate: bool = Fal
         click.echo(f"Rotating PAT for service user {user}...")
         query = f"ALTER USER IF EXISTS {user} ROTATE PAT {pat_name}"
     else:
-        click.echo(f"Creating new PAT for service user {user}...")
-        query = f"ALTER USER IF EXISTS {user} ADD PAT {pat_name} ROLE_RESTRICTION = {role}"
+        click.echo(f"Creating new PAT for service user {user} with role restriction {pat_role}...")
+        query = f"ALTER USER IF EXISTS {user} ADD PAT {pat_name} ROLE_RESTRICTION = {pat_role}"
 
     result = run_snow_sql(query)
 
@@ -203,8 +204,8 @@ def create_or_rotate_pat(user: str, role: str, pat_name: str, rotate: bool = Fal
     return token
 
 
-def update_env(env_path: Path, user, password, role: str) -> None:
-    """Update .envrc file with the new SNOWFLAKE_PASSWORD."""
+def update_env(env_path: Path, user: str, password: str, pat_role: str) -> None:
+    """Update .env file with the new SNOWFLAKE_PASSWORD and SA_ROLE (PAT role restriction)."""
     if not env_path.exists():
         click.echo(f"⚠ {env_path} not found, skipping update")
         return
@@ -233,9 +234,9 @@ def update_env(env_path: Path, user, password, role: str) -> None:
     else:
         new_content = new_content.rstrip() + f"\n{user_replacement}\n"
 
-    # Replace or add SA_ROLE
+    # Replace or add SA_ROLE (the PAT role restriction)
     role_pattern = r"^SA_ROLE=.*$"
-    role_replacement = f"SA_ROLE='{role}'"
+    role_replacement = f"SA_ROLE='{pat_role}'"
 
     if re.search(role_pattern, new_content, re.MULTILINE):
         new_content = re.sub(role_pattern, role_replacement, new_content, flags=re.MULTILINE)
@@ -246,7 +247,7 @@ def update_env(env_path: Path, user, password, role: str) -> None:
     click.echo(f"✓ Updated {env_path} with new SNOWFLAKE_PASSWORD, SA_USER, and SA_ROLE")
 
 
-def verify_connection(user: str, password: str) -> None:
+def verify_connection(user: str, password: str, pat_role: str) -> None:
     """Verify the PAT connection works."""
     click.echo("Verifying connection with PAT...")
 
@@ -261,6 +262,8 @@ def verify_connection(user: str, password: str) -> None:
             user,
             "--account",
             account,
+            "--role",
+            pat_role,
             "-q",
             "SELECT current_timestamp()",
         ],
@@ -288,7 +291,14 @@ def verify_connection(user: str, password: str) -> None:
     "-r",
     envvar="SA_ROLE",
     required=True,
-    help="Service account role (or set SA_ROLE env var)",
+    help="Role restriction for the PAT (or set SA_ROLE env var)",
+)
+@click.option(
+    "--admin-role",
+    "-a",
+    envvar="SA_ADMIN_ROLE",
+    default=None,
+    help="Admin role for creating network rules/policies (default: --role)",
 )
 @click.option(
     "--db",
@@ -339,6 +349,7 @@ def verify_connection(user: str, password: str) -> None:
 def main(
     user: str,
     role: str,
+    admin_role: str | None,
     db: str,
     pat_name: str | None,
     rotate: bool,
@@ -361,22 +372,32 @@ def main(
     5. Updates .env with the new credentials
     6. Verifies the connection works
 
+    \b
+    Two roles can be specified:
+    - --admin-role: Role with privileges to create network rules, policies, database objects
+    - --role: Role restriction for the PAT (the role the service account will actually use)
+
     Example:
 
     \b
         # Using environment variables
         export SA_USER=my_service_user
-        export SA_ROLE=my_role
+        export SA_ROLE=demo_role           # PAT role restriction
+        export SA_ADMIN_ROLE=sysadmin      # Role for creating policies
         export PAT_OBJECTS_DB=my_db
         python pat.py
 
-        # Using CLI arguments
-        python pat.py --user my_user --role my_role --db my_db
+        # Using CLI arguments (admin-role defaults to role if not specified)
+        python pat.py --user my_user --role demo_role --admin-role sysadmin --db my_db
     """
     click.echo("=" * 50)
     click.echo("Snowflake PAT Manager")
     click.echo("=" * 50)
     click.echo()
+
+    # Set default admin_role to role if not provided
+    if not admin_role:
+        admin_role = role
 
     # Set default pat_name based on user if not provided
     if not pat_name:
@@ -389,31 +410,34 @@ def main(
         click.echo(f"✓ Local IP: {local_ip}")
 
     click.echo()
-    click.echo(f"User:     {user}")
-    click.echo(f"Role:     {role}")
-    click.echo(f"Database: {db}")
-    click.echo(f"PAT Name: {pat_name}")
+    click.echo(f"User:       {user}")
+    click.echo(f"PAT Role:   {role} (role restriction for PAT)")
+    click.echo(f"Admin Role: {admin_role} (for creating policies)")
+    click.echo(f"Database:   {db}")
+    click.echo(f"PAT Name:   {pat_name}")
 
     click.echo()
 
-    # Step 1: Setup service user
-    setup_service_user(user, role)
+    # Step 1: Setup service user (grants the PAT role to user)
+    setup_service_user(user=user, pat_role=role)
 
-    # Step 2: Setup network policy
-    setup_network_policy(user, role, db, local_ip)
+    # Step 2: Setup network policy (uses admin_role for creating resources)
+    setup_network_policy(user=user, admin_role=admin_role, db=db, local_ip=local_ip)
 
-    # Step 3: Setup authentication policy
-    setup_auth_policy(user, db, default_expiry_days, max_expiry_days)
+    # Step 3: Setup authentication policy (uses admin_role)
+    setup_auth_policy(
+        user=user, db=db, default_expiry_days=default_expiry_days, max_expiry_days=max_expiry_days
+    )
 
-    # Step 4: Create or rotate PAT
-    password = create_or_rotate_pat(user, role, pat_name, rotate=rotate)
+    # Step 4: Create or rotate PAT (uses role as the PAT role restriction)
+    password = create_or_rotate_pat(user=user, pat_role=role, pat_name=pat_name, rotate=rotate)
 
-    # Step 5: Update .env
-    update_env(env_path, user, password, role)
+    # Step 5: Update .env (stores the PAT role)
+    update_env(env_path=env_path, user=user, password=password, pat_role=role)
 
     # Step 6: Verify connection
     if not skip_verify:
-        verify_connection(user, password)
+        verify_connection(user=user, password=password, pat_role=role)
 
     click.echo()
     click.echo("=" * 50)
