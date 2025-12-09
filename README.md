@@ -490,12 +490,22 @@ snow-utils help:naming
 
 ## Development
 
-| Command | Description |
-|---------|-------------|
-| `setup` | Setup development environment with uv |
-| `install` | Install dependencies |
-| `lint` | Run linting |
-| `format` | Format code |
+```bash
+# Setup environment
+task setup              # or: uv venv && uv sync
+
+# Install dependencies
+task install            # or: uv sync
+
+# Lint code
+uv run ruff check .
+
+# Format code
+uv run ruff format .
+
+# Lint and fix
+uv run ruff check . --fix
+```
 
 ---
 
