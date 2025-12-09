@@ -6,15 +6,61 @@ SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 TASKFILE="$SCRIPT_DIR/Taskfile.yml"
 
+# Generate shell completion
+if [[ "$1" == "--completion" ]]; then
+    shell="${2:-bash}"
+    case "$shell" in
+        bash)
+            cat <<'EOF'
+_snow_utils_completions() {
+    local tasks
+    tasks=$(snow-utils --list-tasks 2>/dev/null)
+    COMPREPLY=($(compgen -W "$tasks" -- "${COMP_WORDS[COMP_CWORD]}"))
+}
+complete -F _snow_utils_completions snow-utils
+EOF
+            ;;
+        zsh)
+            cat <<'EOF'
+#compdef snow-utils
+
+_snow_utils() {
+    local -a tasks
+    tasks=(${(f)"$(snow-utils --list-tasks 2>/dev/null | sed 's/:/\\:/g')"})
+    _describe 'task' tasks
+}
+
+_snow_utils "$@"
+EOF
+            ;;
+        *)
+            echo "Unsupported shell: $shell (use bash or zsh)"
+            exit 1
+            ;;
+    esac
+    exit 0
+fi
+
+# List just task names (for completion scripts)
+if [[ "$1" == "--list-tasks" ]]; then
+    task --taskfile "$TASKFILE" --list-all 2>/dev/null | \
+        awk '/^\* / { gsub(/:$/, "", $2); print $2 }'
+    exit 0
+fi
+
 # Handle --help to list all tasks
 if [[ "$1" == "--help" || "$1" == "-h" ]]; then
     echo "snow-utils - Snowflake External Volume & PAT Manager"
     echo ""
     echo "Usage: snow-utils <task> [options]"
     echo ""
+    echo "Options:"
+    echo "  --help, -h          Show this help and list all tasks"
+    echo "  --completion [shell] Generate shell completion (bash or zsh)"
+    echo "  --list-tasks        List task names (for completion scripts)"
+    echo ""
     exec task --taskfile "$TASKFILE" --list-all
 fi
 
 # Run task with the Taskfile in the same directory as this script
 exec task --taskfile "$TASKFILE" "$@"
-
