@@ -11,16 +11,51 @@ import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
 import requests
 
 
+@dataclass
+class SnowCLIOptions:
+    """Options for snow CLI commands."""
+
+    verbose: bool = False
+    debug: bool = False
+
+    def get_flags(self) -> list[str]:
+        """Get CLI flags based on options."""
+        flags = []
+        if self.debug:
+            flags.append("--debug")
+        elif self.verbose:
+            flags.append("--verbose")
+        return flags
+
+
+# Global options (set by CLI group)
+_snow_cli_options = SnowCLIOptions()
+
+
+def set_snow_cli_options(verbose: bool = False, debug: bool = False) -> None:
+    """Set global snow CLI options."""
+    global _snow_cli_options
+    _snow_cli_options = SnowCLIOptions(verbose=verbose, debug=debug)
+
+
 def run_snow_sql(query: str, *, format: str = "json", check: bool = True) -> dict | list | None:
     """Execute a snow sql command and return parsed JSON output."""
-    cmd = ["snow", "sql", "--query", query, "--format", format]
+    cmd = ["snow", "sql", *_snow_cli_options.get_flags(), "--query", query, "--format", format]
+
+    if _snow_cli_options.debug:
+        click.echo(f"[DEBUG] Running: {' '.join(cmd)}")
+
     result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if _snow_cli_options.debug and result.stderr:
+        click.echo(f"[DEBUG] stderr: {result.stderr}")
 
     if check and result.returncode != 0:
         raise click.ClickException(f"snow sql failed: {result.stderr}")
@@ -35,8 +70,18 @@ def run_snow_sql(query: str, *, format: str = "json", check: bool = True) -> dic
 
 def run_snow_sql_stdin(sql: str, *, check: bool = True) -> subprocess.CompletedProcess:
     """Execute multi-statement SQL via stdin."""
-    cmd = ["snow", "sql", "--stdin"]
+    cmd = ["snow", "sql", *_snow_cli_options.get_flags(), "--stdin"]
+
+    if _snow_cli_options.debug:
+        click.echo(f"[DEBUG] Running: {' '.join(cmd)}")
+        click.echo(f"[DEBUG] SQL:\n{sql}")
+
     result = subprocess.run(cmd, input=sql, capture_output=True, text=True)
+
+    if _snow_cli_options.debug and result.stderr:
+        click.echo(f"[DEBUG] stderr: {result.stderr}")
+    if _snow_cli_options.debug and result.stdout:
+        click.echo(f"[DEBUG] stdout: {result.stdout}")
 
     if check and result.returncode != 0:
         raise click.ClickException(f"snow sql failed: {result.stderr}")
@@ -337,24 +382,33 @@ def verify_connection(user: str, password: str, pat_role: str) -> None:
 
     account = get_snowflake_account()
 
+    cmd = [
+        "snow",
+        "sql",
+        *_snow_cli_options.get_flags(),
+        "-x",
+        "--user",
+        user,
+        "--account",
+        account,
+        "--role",
+        pat_role,
+        "-q",
+        "SELECT current_timestamp()",
+    ]
+
+    if _snow_cli_options.debug:
+        click.echo(f"[DEBUG] Running: {' '.join(cmd)}")
+
     result = subprocess.run(
-        [
-            "snow",
-            "sql",
-            "-x",
-            "--user",
-            user,
-            "--account",
-            account,
-            "--role",
-            pat_role,
-            "-q",
-            "SELECT current_timestamp()",
-        ],
+        cmd,
         env={**os.environ, "SNOWFLAKE_PASSWORD": password},
         capture_output=True,
         text=True,
     )
+
+    if _snow_cli_options.debug and result.stderr:
+        click.echo(f"[DEBUG] stderr: {result.stderr}")
 
     if result.returncode != 0:
         raise click.ClickException(f"Connection verification failed: {result.stderr}")
@@ -363,8 +417,20 @@ def verify_connection(user: str, password: str, pat_role: str) -> None:
 
 
 @click.group(invoke_without_command=True)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose output (info level logging for snow CLI)",
+)
+@click.option(
+    "--debug",
+    "-d",
+    is_flag=True,
+    help="Enable debug output (debug level logging for snow CLI, shows SQL)",
+)
 @click.pass_context
-def cli(ctx: click.Context) -> None:
+def cli(ctx: click.Context, verbose: bool, debug: bool) -> None:
     """
     Snowflake PAT Manager - Manage service users with programmatic access tokens.
 
@@ -372,7 +438,15 @@ def cli(ctx: click.Context) -> None:
     Commands:
         create  - Create/rotate PAT for service user (default)
         remove  - Remove PAT and associated objects
+
+    \b
+    Debug options:
+        --verbose  Show info level output from snow CLI
+        --debug    Show debug output including SQL statements
     """
+    # Set global snow CLI options
+    set_snow_cli_options(verbose=verbose, debug=debug)
+
     # If no subcommand is provided, show help
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())

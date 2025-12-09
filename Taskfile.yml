@@ -54,7 +54,7 @@ tasks:
   # PAT Management Tasks
   # ===========================================================================
 
-  pat:
+  pat:create:
     desc: Create/rotate PAT for service user
     summary: |
       Creates or rotates a Programmatic Access Token (PAT) for the service user.
@@ -67,9 +67,9 @@ tasks:
         DOT_ENV_FILE: Path to .env file to update (default: .env in current directory)
 
       Example:
-        task pat SA_USER=my_service_user SA_ROLE=demo_role SA_ADMIN_ROLE=sysadmin PAT_OBJECTS_DB=my_db
-        task pat DOT_ENV_FILE=/path/to/project/.env  # update .env in specific location
-        task pat  # uses env vars from .env
+        task pat:create SA_USER=my_service_user SA_ROLE=demo_role SA_ADMIN_ROLE=sysadmin PAT_OBJECTS_DB=my_db
+        task pat:create DOT_ENV_FILE=/path/to/project/.env  # update .env in specific location
+        task pat:create  # uses env vars from .env
     cmds:
       - "{{.PAT_CLI}} create {{.CLI_ARGS}}"
     env:

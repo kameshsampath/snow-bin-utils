@@ -24,6 +24,33 @@ from botocore.exceptions import ClientError
 
 
 @dataclass
+class SnowCLIOptions:
+    """Options for snow CLI commands."""
+
+    verbose: bool = False
+    debug: bool = False
+
+    def get_flags(self) -> list[str]:
+        """Get CLI flags based on options."""
+        flags = []
+        if self.debug:
+            flags.append("--debug")
+        elif self.verbose:
+            flags.append("--verbose")
+        return flags
+
+
+# Global options (set by CLI group)
+_snow_cli_options = SnowCLIOptions()
+
+
+def set_snow_cli_options(verbose: bool = False, debug: bool = False) -> None:
+    """Set global snow CLI options."""
+    global _snow_cli_options
+    _snow_cli_options = SnowCLIOptions(verbose=verbose, debug=debug)
+
+
+@dataclass
 class ExternalVolumeConfig:
     """Configuration for external volume setup."""
 
@@ -125,8 +152,15 @@ def get_aws_account_id(sts_client: Any) -> str:
 
 def run_snow_sql(query: str, *, format: str = "json", check: bool = True) -> dict | list | None:
     """Execute a snow sql command and return parsed JSON output."""
-    cmd = ["snow", "sql", "--query", query, "--format", format]
+    cmd = ["snow", "sql", *_snow_cli_options.get_flags(), "--query", query, "--format", format]
+
+    if _snow_cli_options.debug:
+        click.echo(f"[DEBUG] Running: {' '.join(cmd)}")
+
     result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if _snow_cli_options.debug and result.stderr:
+        click.echo(f"[DEBUG] stderr: {result.stderr}")
 
     if check and result.returncode != 0:
         raise click.ClickException(f"snow sql failed: {result.stderr}")
@@ -141,8 +175,18 @@ def run_snow_sql(query: str, *, format: str = "json", check: bool = True) -> dic
 
 def run_snow_sql_stdin(sql: str, *, check: bool = True) -> subprocess.CompletedProcess:
     """Execute multi-statement SQL via stdin."""
-    cmd = ["snow", "sql", "--stdin"]
+    cmd = ["snow", "sql", *_snow_cli_options.get_flags(), "--stdin"]
+
+    if _snow_cli_options.debug:
+        click.echo(f"[DEBUG] Running: {' '.join(cmd)}")
+        click.echo(f"[DEBUG] SQL:\n{sql}")
+
     result = subprocess.run(cmd, input=sql, capture_output=True, text=True)
+
+    if _snow_cli_options.debug and result.stderr:
+        click.echo(f"[DEBUG] stderr: {result.stderr}")
+    if _snow_cli_options.debug and result.stdout:
+        click.echo(f"[DEBUG] stdout: {result.stdout}")
 
     if check and result.returncode != 0:
         raise click.ClickException(f"snow sql failed: {result.stderr}")
@@ -553,8 +597,21 @@ def verify_external_volume(volume_name: str) -> None:
     is_flag=True,
     help="Disable username prefix for AWS resources",
 )
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose output (info level logging for snow CLI)",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable debug output (debug level logging for snow CLI, shows SQL)",
+)
 @click.pass_context
-def cli(ctx: click.Context, region: str, prefix: str | None, no_prefix: bool) -> None:
+def cli(
+    ctx: click.Context, region: str, prefix: str | None, no_prefix: bool, verbose: bool, debug: bool
+) -> None:
     """
     Snowflake External Volume Manager
 
@@ -565,11 +622,19 @@ def cli(ctx: click.Context, region: str, prefix: str | None, no_prefix: bool) ->
     in shared accounts. Use --no-prefix to disable or --prefix to customize.
 
     \b
+    Debug options:
+        --verbose  Show info level output from snow CLI
+        --debug    Show debug output including SQL statements
+
+    \b
     Prerequisites:
     - AWS credentials configured (aws configure or environment variables)
     - Snowflake CLI configured (snow connection test)
     - Appropriate permissions in both AWS and Snowflake
     """
+    # Set global snow CLI options
+    set_snow_cli_options(verbose=verbose, debug=debug)
+
     ctx.ensure_object(dict)
     ctx.obj["region"] = region
 
