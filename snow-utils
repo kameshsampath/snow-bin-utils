@@ -59,7 +59,19 @@ if [[ "$1" == "--help" || "$1" == "-h" ]]; then
     echo "  --completion [shell] Generate shell completion (bash or zsh)"
     echo "  --list-tasks        List task names (for completion scripts)"
     echo ""
+    echo "Task Help:"
+    echo "  snow-utils <task> --help    Show detailed help for a task"
+    echo ""
     exec task --taskfile "$TASKFILE" --list-all
+fi
+
+# Handle <task> --help or <task> -h → show task summary
+if [[ -n "$1" && "$1" != -* ]]; then
+    for arg in "${@:2}"; do
+        if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
+            exec task --taskfile "$TASKFILE" "$1" --summary
+        fi
+    done
 fi
 
 # Run task with the Taskfile in the same directory as this script
