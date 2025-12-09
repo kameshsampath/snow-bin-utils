@@ -71,7 +71,7 @@ tasks:
         task pat DOT_ENV_FILE=/path/to/project/.env  # update .env in specific location
         task pat  # uses env vars from .env
     cmds:
-      - "{{.PAT_CLI}} {{.CLI_ARGS}}"
+      - "{{.PAT_CLI}} create {{.CLI_ARGS}}"
     env:
       SA_USER: "{{.SA_USER}}"
       SA_ROLE: "{{.SA_ROLE}}"
@@ -88,7 +88,7 @@ tasks:
   pat:no-rotate:
     desc: Create PAT without rotating existing
     cmds:
-      - "{{.PAT_CLI}} --no-rotate {{.CLI_ARGS}}"
+      - "{{.PAT_CLI}} create --no-rotate {{.CLI_ARGS}}"
     env:
       SA_USER: "{{.SA_USER}}"
       SA_ROLE: "{{.SA_ROLE}}"
@@ -99,6 +99,37 @@ tasks:
       SA_USER: '{{.SA_USER | default ""}}'
       SA_ROLE: '{{.SA_ROLE | default ""}}'
       SA_ADMIN_ROLE: '{{.SA_ADMIN_ROLE | default ""}}'
+      PAT_OBJECTS_DB: '{{.PAT_OBJECTS_DB | default ""}}'
+      DOT_ENV_FILE: '{{.DOT_ENV_FILE | default ""}}'
+
+  pat:remove:
+    desc: Remove PAT and associated objects
+    summary: |
+      Removes a PAT and associated objects (network policy, auth policy) for a service user.
+      Also clears SNOWFLAKE_PASSWORD from .env file.
+
+      Environment variables (can be set in .env):
+        SA_USER: Service account username
+        PAT_OBJECTS_DB: Database where PAT objects are stored
+        DOT_ENV_FILE: Path to .env file to clear credentials from
+
+      Options:
+        --pat-only: Only remove the PAT, keep policies
+        --drop-user: Also drop the service user
+
+      Example:
+        task pat:remove SA_USER=my_service_user PAT_OBJECTS_DB=my_db
+        task pat:remove DOT_ENV_FILE=/path/to/.env  # clear specific .env
+        task pat:remove -- --pat-only    # only remove PAT
+        task pat:remove -- --drop-user   # also drop the user
+    cmds:
+      - "{{.PAT_CLI}} remove --yes {{.CLI_ARGS}}"
+    env:
+      SA_USER: "{{.SA_USER}}"
+      PAT_OBJECTS_DB: "{{.PAT_OBJECTS_DB}}"
+      DOT_ENV_FILE: "{{.DOT_ENV_FILE}}"
+    vars:
+      SA_USER: '{{.SA_USER | default ""}}'
       PAT_OBJECTS_DB: '{{.PAT_OBJECTS_DB | default ""}}'
       DOT_ENV_FILE: '{{.DOT_ENV_FILE | default ""}}'
 

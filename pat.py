@@ -204,6 +204,65 @@ def create_or_rotate_pat(user: str, pat_role: str, pat_name: str, rotate: bool =
     return token
 
 
+def remove_pat(user: str, pat_name: str) -> None:
+    """Remove a PAT from a user."""
+    click.echo(f"Removing PAT '{pat_name}' from user {user}...")
+
+    existing = get_existing_pat(user, pat_name)
+    if not existing:
+        click.echo(f"⚠ PAT '{pat_name}' not found for user {user}")
+        return
+
+    sql = f"ALTER USER IF EXISTS {user} REMOVE PAT {pat_name}"
+    run_snow_sql(sql)
+    click.echo(f"✓ Removed PAT '{pat_name}'")
+
+
+def remove_network_policy(user: str, db: str) -> None:
+    """Remove network rule and policy for a user."""
+    network_rule_name = f"{user}_network_rule".upper()
+    network_policy_name = f"{user}_network_policy".upper()
+
+    click.echo(f"Removing network policy: {network_policy_name}")
+    click.echo(f"Removing network rule: {db}.networks.{network_rule_name}")
+
+    sql = f"""
+        USE ROLE accountadmin;
+        ALTER USER IF EXISTS {user} UNSET NETWORK_POLICY;
+        DROP NETWORK POLICY IF EXISTS {network_policy_name};
+        DROP NETWORK RULE IF EXISTS {db}.networks.{network_rule_name};
+    """
+    run_snow_sql_stdin(sql, check=False)
+    click.echo("✓ Network policy and rule removed")
+
+
+def remove_auth_policy(user: str, db: str) -> None:
+    """Remove authentication policy for a user."""
+    auth_policy_name = f"{user}_auth_policy".upper()
+
+    click.echo(f"Removing authentication policy: {db}.policies.{auth_policy_name}")
+
+    sql = f"""
+        USE ROLE accountadmin;
+        ALTER USER IF EXISTS {user} UNSET AUTHENTICATION POLICY;
+        DROP AUTHENTICATION POLICY IF EXISTS {db}.policies.{auth_policy_name};
+    """
+    run_snow_sql_stdin(sql, check=False)
+    click.echo("✓ Authentication policy removed")
+
+
+def remove_service_user(user: str) -> None:
+    """Drop the service user."""
+    click.echo(f"Dropping service user: {user}")
+
+    sql = f"""
+        USE ROLE accountadmin;
+        DROP USER IF EXISTS {user};
+    """
+    run_snow_sql_stdin(sql)
+    click.echo(f"✓ Service user {user} dropped")
+
+
 def update_env(env_path: Path, user: str, password: str, pat_role: str) -> None:
     """Update .env file with the new SNOWFLAKE_PASSWORD and SA_ROLE (PAT role restriction)."""
     if not env_path.exists():
@@ -247,6 +306,27 @@ def update_env(env_path: Path, user: str, password: str, pat_role: str) -> None:
     click.echo(f"✓ Updated {env_path} with new SNOWFLAKE_PASSWORD, SA_USER, and SA_ROLE")
 
 
+def clear_env(env_path: Path) -> None:
+    """Clear PAT credentials from .env file."""
+    if not env_path.exists():
+        click.echo(f"⚠ {env_path} not found, skipping")
+        return
+
+    content = env_path.read_text()
+
+    # Create backup
+    backup_path = env_path.with_suffix(".env.bak")
+    shutil.copy(env_path, backup_path)
+    click.echo(f"✓ Created backup: {backup_path}")
+
+    # Set SNOWFLAKE_PASSWORD to empty string
+    password_pattern = r"^SNOWFLAKE_PASSWORD=.*$"
+    new_content = re.sub(password_pattern, "SNOWFLAKE_PASSWORD=''", content, flags=re.MULTILINE)
+
+    env_path.write_text(new_content)
+    click.echo(f"✓ Cleared SNOWFLAKE_PASSWORD in {env_path}")
+
+
 def verify_connection(user: str, password: str, pat_role: str) -> None:
     """Verify the PAT connection works."""
     click.echo("Verifying connection with PAT...")
@@ -278,7 +358,23 @@ def verify_connection(user: str, password: str, pat_role: str) -> None:
     click.echo("✓ Connection verified successfully")
 
 
-@click.command()
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx: click.Context) -> None:
+    """
+    Snowflake PAT Manager - Manage service users with programmatic access tokens.
+
+    \b
+    Commands:
+        create  - Create/rotate PAT for service user (default)
+        remove  - Remove PAT and associated objects
+    """
+    # If no subcommand is provided, show help
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@cli.command(name="create")
 @click.option(
     "--user",
     "-u",
@@ -346,7 +442,7 @@ def verify_connection(user: str, password: str, pat_role: str) -> None:
     type=int,
     help="Maximum PAT expiry in days (default: 90)",
 )
-def main(
+def create_command(
     user: str,
     role: str,
     admin_role: str | None,
@@ -360,9 +456,9 @@ def main(
     max_expiry_days: int,
 ) -> None:
     """
-    Snowflake PAT Manager - Setup service user with programmatic access tokens.
+    Create or rotate a PAT for a service user.
 
-    This tool:
+    This command:
 
     \b
     1. Creates/configures a Snowflake service user
@@ -385,10 +481,10 @@ def main(
         export SA_ROLE=demo_role           # PAT role restriction
         export SA_ADMIN_ROLE=sysadmin      # Role for creating policies
         export PAT_OBJECTS_DB=my_db
-        python pat.py
+        python pat.py create
 
         # Using CLI arguments (admin-role defaults to role if not specified)
-        python pat.py --user my_user --role demo_role --admin-role sysadmin --db my_db
+        python pat.py create --user my_user --role demo_role --admin-role sysadmin --db my_db
     """
     click.echo("=" * 50)
     click.echo("Snowflake PAT Manager")
@@ -445,5 +541,136 @@ def main(
     click.echo("=" * 50)
 
 
+@cli.command(name="remove")
+@click.option(
+    "--user",
+    "-u",
+    envvar="SA_USER",
+    required=True,
+    help="Service account user name (or set SA_USER env var)",
+)
+@click.option(
+    "--db",
+    "-d",
+    envvar="PAT_OBJECTS_DB",
+    required=True,
+    help="Database where PAT objects are stored (or set PAT_OBJECTS_DB env var)",
+)
+@click.option(
+    "--pat-name",
+    default=None,
+    envvar="PAT_NAME",
+    help="Name of the PAT to remove (default: {user}_pat)",
+)
+@click.option(
+    "--drop-user",
+    is_flag=True,
+    help="Also drop the service user (default: keep user)",
+)
+@click.option(
+    "--pat-only",
+    is_flag=True,
+    help="Only remove the PAT, keep network and auth policies",
+)
+@click.option(
+    "--env-path",
+    type=click.Path(path_type=Path),
+    default=Path(".env"),
+    envvar="DOT_ENV_FILE",
+    help="Path to .env file to clear credentials from",
+)
+@click.confirmation_option(prompt="Are you sure you want to remove the PAT and associated objects?")
+def remove_command(
+    user: str,
+    db: str,
+    pat_name: str | None,
+    drop_user: bool,
+    pat_only: bool,
+    env_path: Path,
+) -> None:
+    """
+    Remove PAT and associated objects for a service user.
+
+    This command removes:
+
+    \b
+    1. The PAT (programmatic access token)
+    2. Network policy and network rule (unless --pat-only)
+    3. Authentication policy (unless --pat-only)
+    4. Optionally the service user (with --drop-user)
+    5. Clears SNOWFLAKE_PASSWORD from .env file
+
+    \b
+    Based on Snowflake documentation:
+    https://docs.snowflake.com/en/sql-reference/sql/alter-user-remove-programmatic-access-token
+
+    Example:
+
+    \b
+        # Remove PAT and policies (keep user)
+        python pat.py remove --user my_service_user --db my_db
+
+        # Remove only the PAT
+        python pat.py remove --user my_service_user --db my_db --pat-only
+
+        # Remove everything including the user
+        python pat.py remove --user my_service_user --db my_db --drop-user
+    """
+    click.echo("=" * 50)
+    click.echo("Snowflake PAT Manager - Remove")
+    click.echo("=" * 50)
+    click.echo()
+
+    # Set default pat_name based on user if not provided
+    if not pat_name:
+        pat_name = f"{user}_pat".upper()
+
+    click.echo(f"User:     {user}")
+    click.echo(f"Database: {db}")
+    click.echo(f"PAT Name: {pat_name}")
+    click.echo()
+
+    # Step 1: Remove PAT
+    click.echo("─" * 40)
+    click.echo("Step 1: Remove PAT")
+    click.echo("─" * 40)
+    remove_pat(user=user, pat_name=pat_name)
+    click.echo()
+
+    if not pat_only:
+        # Step 2: Remove network policy
+        click.echo("─" * 40)
+        click.echo("Step 2: Remove Network Policy")
+        click.echo("─" * 40)
+        remove_network_policy(user=user, db=db)
+        click.echo()
+
+        # Step 3: Remove authentication policy
+        click.echo("─" * 40)
+        click.echo("Step 3: Remove Authentication Policy")
+        click.echo("─" * 40)
+        remove_auth_policy(user=user, db=db)
+        click.echo()
+
+    if drop_user:
+        # Step 4: Drop user
+        click.echo("─" * 40)
+        click.echo("Step 4: Drop Service User")
+        click.echo("─" * 40)
+        remove_service_user(user=user)
+        click.echo()
+
+    # Step 5: Clear credentials from .env
+    click.echo("─" * 40)
+    click.echo("Step 5: Clear Credentials from .env")
+    click.echo("─" * 40)
+    clear_env(env_path=env_path)
+    click.echo()
+
+    click.echo("=" * 50)
+    click.echo("✓ PAT removal completed successfully!")
+    click.echo("=" * 50)
+
+
 if __name__ == "__main__":
-    main()  # type: ignore[call-arg] # noqa: S101
+    cli()  # type: ignore[call-arg] # noqa: S101

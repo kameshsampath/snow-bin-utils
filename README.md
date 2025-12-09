@@ -130,6 +130,7 @@ snow-utils extvolume:delete BUCKET=my-data -- --delete-bucket --force
 |---------|-------------|
 | `pat` | Create/rotate PAT for service user |
 | `pat:no-rotate` | Create PAT without rotating existing |
+| `pat:remove` | Remove PAT and associated objects |
 
 #### Examples
 
@@ -145,6 +146,15 @@ snow-utils pat
 
 # Create without rotating existing PAT
 snow-utils pat:no-rotate
+
+# Remove PAT and associated policies (keeps user)
+snow-utils pat:remove SA_USER=my_service_user PAT_OBJECTS_DB=my_db
+
+# Remove only the PAT (keep network/auth policies)
+snow-utils pat:remove SA_USER=my_service_user PAT_OBJECTS_DB=my_db -- --pat-only
+
+# Remove everything including the service user
+snow-utils pat:remove SA_USER=my_service_user PAT_OBJECTS_DB=my_db -- --drop-user
 ```
 
 ### Snowflake CLI Shortcuts
